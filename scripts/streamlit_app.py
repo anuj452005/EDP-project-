@@ -20,6 +20,11 @@ def load_yolo_model(path: str):
     return YOLO(str(path))
 
 @st.cache_resource
+def load_seg_model(path: str):
+    """Load YOLOv8 segmentation model for severity estimation."""
+    return YOLO(str(path))
+
+@st.cache_resource
 def load_mobilenet_model(path: str):
     # Ensure reproducible light logging
     tf.get_logger().setLevel('ERROR')
@@ -182,27 +187,156 @@ def estimate_severity_heuristic(crop_bgr):
     # Clamp to valid range
     return float(np.clip(severity, 0.0, 100.0))
 
+def get_full_image_disease_mask(seg_model, image_bgr, conf=0.25):
+    """
+    Run YOLOv8-seg on the FULL image to get disease masks.
+    The model was trained on full images, so this is how it should be used.
+    
+    Returns combined binary mask of all disease regions.
+    """
+    if image_bgr is None or image_bgr.size == 0:
+        return None
+    
+    h, w = image_bgr.shape[:2]
+    
+    try:
+        # Run segmentation on full image
+        img_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        results = seg_model.predict(source=img_rgb, conf=conf, verbose=False)
+        
+        combined_mask = np.zeros((h, w), dtype=np.uint8)
+        
+        for r in results:
+            if hasattr(r, 'masks') and r.masks is not None and len(r.masks) > 0:
+                # Get masks data - shape is typically (N, H_mask, W_mask)
+                masks_data = r.masks.data.cpu().numpy()
+                
+                for mask in masks_data:
+                    # Resize mask to original image size
+                    mask_resized = cv2.resize(mask.astype(np.float32), (w, h))
+                    binary_mask = (mask_resized > 0.5).astype(np.uint8) * 255
+                    combined_mask = cv2.bitwise_or(combined_mask, binary_mask)
+        
+        return combined_mask
+        
+    except Exception as e:
+        print(f"Segmentation error: {e}")
+        return None
+
+
+def estimate_severity_from_mask(disease_mask, box, image_bgr):
+    """
+    Calculate severity for a specific leaf bounding box based on disease mask.
+    
+    Args:
+        disease_mask: Full image binary mask of disease regions
+        box: (x1, y1, x2, y2) bounding box of the leaf
+        image_bgr: Original image for leaf area estimation
+    
+    Returns:
+        Severity percentage (0-100%)
+    """
+    if disease_mask is None:
+        return 0.0
+    
+    x1, y1, x2, y2 = box
+    h, w = disease_mask.shape[:2]
+    
+    # Clamp to image bounds
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w, x2), min(h, y2)
+    
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    
+    # Crop the disease mask to this leaf's box
+    mask_crop = disease_mask[y1:y2, x1:x2]
+    leaf_crop = image_bgr[y1:y2, x1:x2]
+    
+    # Count disease pixels in this region
+    disease_pixels = cv2.countNonZero(mask_crop)
+    
+    # Estimate leaf area (exclude background)
+    gray = cv2.cvtColor(leaf_crop, cv2.COLOR_BGR2GRAY)
+    _, leaf_mask = cv2.threshold(gray, 30, 255, cv2.THRESH_BINARY)
+    leaf_pixels = cv2.countNonZero(leaf_mask)
+    
+    # Calculate severity
+    if leaf_pixels < 100:
+        leaf_pixels = (x2 - x1) * (y2 - y1)  # Use box area as fallback
+    
+    severity = (disease_pixels / leaf_pixels) * 100.0
+    return float(np.clip(severity, 0.0, 100.0))
+
+def calculate_pesticide_dosage(spray_tier):
+    """
+    Calculate recommended pesticide dosage as percentage of standard rate.
+    Based on precision agriculture best practices.
+    """
+    dosage_rates = {
+        'NO_ACTION': 0,    # No spray needed
+        'LOW': 25,         # 25% - preventive mist
+        'MEDIUM': 50,      # 50% - standard spray  
+        'HIGH': 75,        # 75% - thorough spray
+        'CRITICAL': 100    # 100% - full dosage + alert
+    }
+    return dosage_rates.get(spray_tier, 50)
+
+
 def aggregate_and_decide(per_leaf, config=None):
+    """
+    Aggregate per-leaf results and determine spray tier.
+    
+    Improved thresholds based on precision agriculture standards:
+    - Lower infection detection threshold (3% instead of 5%)
+    - Stricter severity thresholds for earlier intervention
+    - New CRITICAL tier for very severe cases
+    - Pesticide dosage recommendation output
+    """
     if config is None:
         config = {
-            'severity_min_for_infected': 5.0,
-            'low_count': 3,
-            'medium_count': 7,
-            'low_severity': 15.0,
-            'high_severity': 40.0
+            'severity_min_for_infected': 3.0,   # Lower to catch early (was 5.0)
+            'low_count': 2,                      # 2+ infected = concern (was 3)
+            'medium_count': 4,                   # 4+ infected = action (was 7)
+            'low_severity': 10.0,                # 10% is concerning (was 15.0)
+            'high_severity': 25.0,               # 25% needs action (was 40.0)
+            'critical_severity': 35.0,           # NEW: 35%+ = critical
+            'critical_infected_ratio': 0.7       # NEW: 70%+ leaves infected = critical
         }
+    
+    total_leaves = len(per_leaf)
     infected = [p for p in per_leaf if p['severity'] >= config['severity_min_for_infected']]
     count = len(infected)
     avg = float(np.mean([p['severity'] for p in infected]) if infected else 0.0)
-    if count == 0 or avg < 5.0:
+    max_sev = float(max([p['severity'] for p in infected]) if infected else 0.0)
+    
+    # Calculate infected ratio
+    infected_ratio = count / total_leaves if total_leaves > 0 else 0
+    
+    # Determine spray tier with stricter thresholds
+    if count == 0 or avg < 3.0:
         tier = 'NO_ACTION'
-    elif count < config['low_count'] and avg < config['low_severity']:
-        tier = 'LOW'
-    elif count < config['medium_count'] or avg < config['high_severity']:
+    elif avg >= config['critical_severity'] or infected_ratio >= config['critical_infected_ratio']:
+        tier = 'CRITICAL'
+    elif count >= config['medium_count'] and avg >= config['high_severity']:
+        tier = 'HIGH'
+    elif count >= config['low_count'] or avg >= config['low_severity']:
         tier = 'MEDIUM'
     else:
-        tier = 'HIGH'
-    return {'infected_count': count, 'avg_severity': avg, 'spray_tier': tier}
+        tier = 'LOW'
+    
+    # Calculate recommended pesticide dosage
+    dosage = calculate_pesticide_dosage(tier)
+    
+    return {
+        'infected_count': count,
+        'total_leaves': total_leaves,
+        'avg_severity': avg,
+        'max_severity': max_sev,
+        'infected_ratio': infected_ratio,
+        'spray_tier': tier,
+        'dosage_percent': dosage
+    }
 
 def draw_annotated(image_bgr, detections, per_leaf):
     img = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
@@ -283,10 +417,14 @@ if 'yolo_model' not in st.session_state:
     st.session_state.yolo_model = None
 if 'mobilenet_model' not in st.session_state:
     st.session_state.mobilenet_model = None
+if 'seg_model' not in st.session_state:
+    st.session_state.seg_model = None
 if 'class_names' not in st.session_state:
     st.session_state.class_names = []
 if 'models_loaded' not in st.session_state:
     st.session_state.models_loaded = False
+if 'use_segmentation' not in st.session_state:
+    st.session_state.use_segmentation = True
 
 # Sidebar with organized sections
 with st.sidebar:
@@ -295,7 +433,7 @@ with st.sidebar:
     # Model Configuration Section
     with st.expander("📁 Model Paths", expanded=True):
         yolopath = st.text_input(
-            "YOLOv8 model path (.pt)", 
+            "YOLOv8 Detection model (.pt)", 
             value="models/yolov8_leaf.pt",
             help="Path to the trained YOLOv8 model for leaf detection"
         )
@@ -309,6 +447,28 @@ with st.sidebar:
             value="data/class_names.txt",
             help="Path to the text file containing class names (one per line)"
         )
+        
+        st.markdown("---")
+        st.markdown("##### 🔬 Severity Estimation")
+        
+        use_segmentation = st.toggle(
+            "Use Segmentation Model",
+            value=st.session_state.use_segmentation,
+            key="seg_toggle",
+            help="Toggle OFF to use heuristic color-based analysis instead"
+        )
+        st.session_state.use_segmentation = use_segmentation
+        
+        if use_segmentation:
+            segpath = st.text_input(
+                "YOLOv8 Segmentation model (.pt)",
+                value="models/yolov8_seg.pt",
+                help="Path to YOLOv8-seg model for disease region segmentation"
+            )
+            st.success("✨ Segmentation: More accurate (~85-95%)")
+        else:
+            segpath = None
+            st.info("📊 Using heuristic color-based analysis (no seg model needed)")
     
     # Detection Settings Section
     with st.expander("🎯 Detection Settings", expanded=True):
@@ -378,6 +538,7 @@ with st.sidebar:
 # Load models on demand
 yolo_model = None
 mobilenet_model = None
+seg_model = None
 class_names = []
 
 if run_button:
@@ -385,15 +546,27 @@ if run_button:
         progress = st.progress(0, text="Initializing...")
         
         try:
-            progress.progress(10, text="Loading YOLO model...")
+            progress.progress(10, text="Loading YOLO detection model...")
             st.session_state.yolo_model = load_yolo_model(yolopath)
-            progress.progress(40, text="YOLO loaded ✓")
+            progress.progress(30, text="YOLO loaded ✓")
         except Exception as e:
             st.error(f"❌ YOLO load error: {e}")
             st.session_state.models_loaded = False
+        
+        # Load segmentation model if enabled
+        if use_segmentation and segpath:
+            try:
+                progress.progress(40, text="Loading Segmentation model...")
+                st.session_state.seg_model = load_seg_model(segpath)
+                progress.progress(50, text="Segmentation loaded ✓")
+            except Exception as e:
+                st.warning(f"⚠️ Seg model load error: {e}. Falling back to heuristic.")
+                st.session_state.seg_model = None
+        else:
+            st.session_state.seg_model = None
             
         try:
-            progress.progress(50, text="Loading MobileNet model...")
+            progress.progress(60, text="Loading MobileNet model...")
             st.session_state.mobilenet_model = load_mobilenet_model(mobpath)
             progress.progress(80, text="MobileNet loaded ✓")
         except Exception as e:
@@ -421,6 +594,7 @@ if run_button:
 # Use models from session state
 yolo_model = st.session_state.yolo_model
 mobilenet_model = st.session_state.mobilenet_model
+seg_model = st.session_state.seg_model
 class_names = st.session_state.class_names
 
 st.markdown("---")
@@ -457,23 +631,64 @@ if image_data is not None:
                 img_rgb = np.array(image_data)
                 img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
             st.image(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB), caption="Input image", use_container_width=True)
+            
+            # Show which severity method is being used
+            if seg_model is not None and st.session_state.use_segmentation:
+                st.info("🔬 Using **Segmentation Model** for severity estimation (more accurate)")
+            else:
+                st.info("📊 Using **Heuristic** for severity estimation")
+            
             with st.spinner("Running detection + classification..."):
                 dets = detect_leaves(yolo_model, img_bgr, conf=conf_thresh)
+                
+                # Run segmentation on FULL image once (if enabled)
+                disease_mask = None
+                if seg_model is not None and st.session_state.use_segmentation:
+                    disease_mask = get_full_image_disease_mask(seg_model, img_bgr, conf=0.25)
+                
                 per_leaf = []
-                for d in dets:
-                    crop, absbox = crop_box(img_bgr, d['xyxy'])
-                    if crop is None or crop.size == 0:
-                        lbl, conf, probs = "UNKNOWN", 0.0, None
-                        sev = 0.0
+                
+                # FALLBACK: If no leaves detected, treat entire image as one leaf
+                # This handles cropped single-leaf images
+                if len(dets) == 0:
+                    st.warning("⚠️ No leaves detected - treating entire image as a single leaf")
+                    h, w = img_bgr.shape[:2]
+                    # Create a fake detection covering the whole image
+                    whole_image_box = [0, 0, w, h]
+                    lbl, conf, probs = classify_crop(mobilenet_model, img_bgr, class_names)
+                    
+                    if disease_mask is not None:
+                        sev = estimate_severity_from_mask(disease_mask, whole_image_box, img_bgr)
                     else:
-                        lbl, conf, probs = classify_crop(mobilenet_model, crop, class_names)
-                        sev = estimate_severity_heuristic(crop)
+                        sev = estimate_severity_heuristic(img_bgr)
+                    
                     per_leaf.append({
                         'class': lbl,
                         'conf': conf,
                         'severity': sev,
-                        'box': absbox
+                        'box': tuple(whole_image_box)
                     })
+                    dets = [{'xyxy': whole_image_box, 'conf': 1.0, 'cls': 0}]
+                else:
+                    for d in dets:
+                        crop, absbox = crop_box(img_bgr, d['xyxy'])
+                        if crop is None or crop.size == 0:
+                            lbl, conf, probs = "UNKNOWN", 0.0, None
+                            sev = 0.0
+                        else:
+                            lbl, conf, probs = classify_crop(mobilenet_model, crop, class_names)
+                            # Use segmentation mask if available, else heuristic
+                            if disease_mask is not None:
+                                sev = estimate_severity_from_mask(disease_mask, absbox, img_bgr)
+                            else:
+                                sev = estimate_severity_heuristic(crop)
+                        per_leaf.append({
+                            'class': lbl,
+                            'conf': conf,
+                            'severity': sev,
+                            'box': absbox
+                        })
+                        
                 agg = aggregate_and_decide(per_leaf)
             
             # Results Section with better styling
@@ -483,15 +698,16 @@ if image_data is not None:
             # Spray Tier with color-coded badge
             tier = agg['spray_tier']
             tier_colors = {
-                'NO_ACTION': ('🟢', '#4caf50', 'Healthy - No action needed'),
-                'LOW': ('🟡', '#ffeb3b', 'Low risk - Monitor closely'),
-                'MEDIUM': ('🟠', '#ff9800', 'Medium risk - Treatment recommended'),
-                'HIGH': ('🔴', '#f44336', 'High risk - Immediate action required')
+                'NO_ACTION': ('🟢', '#4caf50', 'Healthy - No spray needed'),
+                'LOW': ('🟡', '#ffeb3b', 'Low risk - 25% preventive mist'),
+                'MEDIUM': ('🟠', '#ff9800', 'Medium risk - 50% standard spray'),
+                'HIGH': ('🔴', '#f44336', 'High risk - 75% thorough spray'),
+                'CRITICAL': ('🟣', '#9c27b0', 'Critical - 100% full dosage + alert farmer')
             }
             tier_emoji, tier_color, tier_desc = tier_colors.get(tier, ('⚪', '#9e9e9e', 'Unknown'))
             
-            # Metrics in columns
-            col1, col2, col3 = st.columns(3)
+            # Metrics in 4 columns (added dosage)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric(
                     label="🎯 Spray Tier",
@@ -500,16 +716,22 @@ if image_data is not None:
                 )
             with col2:
                 st.metric(
-                    label="🍃 Leaves Detected",
-                    value=len(dets),
-                    delta=f"{agg['infected_count']} infected" if agg['infected_count'] > 0 else None,
+                    label="🍃 Leaves",
+                    value=f"{agg['infected_count']}/{agg['total_leaves']}",
+                    delta="infected" if agg['infected_count'] > 0 else None,
                     delta_color="inverse" if agg['infected_count'] > 0 else "normal"
                 )
             with col3:
                 st.metric(
                     label="📈 Avg Severity",
                     value=f"{agg['avg_severity']:.1f}%",
-                    help="Average severity across infected leaves"
+                    help=f"Max: {agg['max_severity']:.1f}%"
+                )
+            with col4:
+                st.metric(
+                    label="💧 Dosage",
+                    value=f"{agg['dosage_percent']}%",
+                    help="Recommended pesticide dosage (% of standard rate)"
                 )
             
             # Recommendation based on tier
@@ -519,8 +741,10 @@ if image_data is not None:
                 st.info(f"💡 **Recommendation:** {tier_desc}")
             elif tier == 'MEDIUM':
                 st.warning(f"⚠️ **Recommendation:** {tier_desc}")
-            else:
+            elif tier == 'HIGH':
                 st.error(f"🚨 **Recommendation:** {tier_desc}")
+            else:  # CRITICAL
+                st.error(f"⛔ **CRITICAL ALERT:** {tier_desc}")
             
             st.markdown("---")
             

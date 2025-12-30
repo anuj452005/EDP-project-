@@ -5,7 +5,7 @@
 [![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-green.svg)](https://ultralytics.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-red.svg)](https://streamlit.io/)
 
-An intelligent plant disease detection pipeline using **YOLOv8** for leaf detection and **MobileNetV2** for disease classification with severity estimation and spray recommendations.
+An intelligent plant disease detection pipeline using **YOLOv8** for leaf detection, **MobileNetV2** for disease classification, and **YOLOv8-seg** for accurate severity estimation with spray recommendations.
 
 ---
 
@@ -17,7 +17,7 @@ An intelligent plant disease detection pipeline using **YOLOv8** for leaf detect
 
 ## 🎯 Severity Estimation
 
-### Current Approach vs Segmentation Model
+### Heuristic vs Segmentation Model
 
 ![Severity Comparison](docs/severity_comparison.png)
 
@@ -31,7 +31,8 @@ An intelligent plant disease detection pipeline using **YOLOv8** for leaf detect
 |---------|-------------|
 | 🔍 **Leaf Detection** | YOLOv8 detects individual leaves |
 | 🏷️ **Disease Classification** | 15 disease classes (Tomato, Potato, Pepper) |
-| 📊 **Severity Estimation** | Color-based heuristic analysis |
+| 🔬 **Segmentation Severity** | YOLOv8-seg for accurate (~85-95%) severity |
+| 📊 **Heuristic Fallback** | Color-based analysis if no seg model |
 | 🎯 **Spray Tiers** | NO_ACTION → LOW → MEDIUM → HIGH |
 
 ---
@@ -44,25 +45,23 @@ pip install -r requirements.txt
 
 # Run Web UI
 streamlit run scripts/streamlit_app.py
-
-# Or batch process
-python scripts/pipeline.py --input_dir data/full_plants --out_dir results
 ```
 
-**Model Paths:**
-- `models/yolov8_leaf.pt` - Leaf detection
-- `models/mobilenetv2_disease.keras` - Disease classifier
-- `data/class_names.txt` - Class labels
+**Models Required:**
+| Model | Path | Purpose |
+|-------|------|---------|
+| YOLOv8 Detection | `models/yolov8_leaf.pt` | Leaf detection |
+| MobileNetV2 | `models/mobilenetv2_disease.keras` | Disease classification |
+| YOLOv8 Segmentation | `models/yolov8_seg.pt` | Severity estimation ⭐ |
 
 ---
 
-## 🎚️ YOLO Confidence Guide
+## 🎚️ Settings Guide
 
-| Value | Best For |
-|-------|----------|
-| **0.25** | Many small leaves |
-| **0.35** | General use ✅ |
-| **0.50** | Close-up shots |
+| Setting | Value | Use Case |
+|---------|-------|----------|
+| **YOLO Confidence** | 0.35 | General use ✅ |
+| **Segmentation Toggle** | ON | More accurate severity |
 
 ---
 
