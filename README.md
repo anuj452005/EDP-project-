@@ -8,7 +8,8 @@
 An intelligent plant disease detection pipeline using **YOLOv8** for leaf detection, **MobileNetV2** for disease classification, and **YOLOv8-seg** for accurate severity estimation with spray recommendations.
 
 ---
-# ![Hugging Face Deployed](https://huggingface.co/spaces/anuj5666449/edp_project)
+# [Hugging Face Deployed](https://huggingface.co/spaces/anuj5666449/edp_project)
+
 
 ## 🔄 Pipeline Architecture
 
