@@ -1,0 +1,9 @@
+ultralytics>=8.0.0
+tensorflow>=2.12.0
+opencv-python-headless
+numpy
+pandas
+pillow
+matplotlib
+streamlit
+streamlit-paste-button
