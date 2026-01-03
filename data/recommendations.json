@@ -1,0 +1,92 @@
+{
+  "Pepper bell - Bacterial spot": {
+    "chemical": "Copper oxychloride or Copper hydroxide + Mancozeb",
+    "dosage": "2.5g/L of Copper oxychloride + 2g/L of Mancozeb",
+    "interval": "10-14 days",
+    "cultural": "Use certified disease-free seeds; avoid overhead irrigation; remove infected debris."
+  },
+  "Pepper bell - healthy": {
+    "chemical": "None",
+    "dosage": "N/A",
+    "interval": "N/A",
+    "cultural": "Regular monitoring and balanced fertilization."
+  },
+  "Potato - Early blight": {
+    "chemical": "Mancozeb 75% WP or Carbendazim 12% + Mancozeb 63% WP",
+    "dosage": "2g/L of Mancozeb or 1.5g/L of combination product",
+    "interval": "15 days",
+    "cultural": "Crop rotation; destroy infected plant debris; maintain adequate spacing."
+  },
+  "Potato - Late blight": {
+    "chemical": "Metalaxyl 8% + Mancozeb 64% (Curative) or Mancozeb (Preventive)",
+    "dosage": "2.5g/L for Curative; 2g/L for Preventive",
+    "interval": "7-10 days",
+    "cultural": "Avoid waterlogging; use resistant varieties; remove volunteer potato plants."
+  },
+  "Potato - healthy": {
+    "chemical": "None",
+    "dosage": "N/A",
+    "interval": "N/A",
+    "cultural": "Proper earthing up and irrigation management."
+  },
+  "Tomato - Bacterial spot": {
+    "chemical": "Copper Oxychloride + Streptomycin (if allowed)",
+    "dosage": "2.5g/L Copper Oxychloride + 1g/10L Streptomycin",
+    "interval": "10 days",
+    "cultural": "Hot water seed treatment (50°C for 25 mins); crop rotation."
+  },
+  "Tomato - Early blight": {
+    "chemical": "Azoxystrobin 11% + Tebuconazole 18.3% SC",
+    "dosage": "1ml/L of water",
+    "interval": "15 days",
+    "cultural": "Staking plants to keep foliage off the ground; mulching."
+  },
+  "Tomato - Late blight": {
+    "chemical": "Cymoxanil 8% + Mancozeb 64% WP",
+    "dosage": "2.5g/L of water",
+    "interval": "7-10 days",
+    "cultural": "Maintain good airflow; avoid late-night irrigation."
+  },
+  "Tomato - Leaf Mold": {
+    "chemical": "Azoxystrobin (Amistar)",
+    "dosage": "1ml/L of water",
+    "interval": "14 days",
+    "cultural": "Improve greenhouse ventilation; reduce humidity below 85%."
+  },
+  "Tomato - Septoria leaf spot": {
+    "chemical": "Chlorothalonil 75% WP or Hexaconazole 5% EC",
+    "dosage": "2g/L Chlorothalonil or 0.5ml/L Hexaconazole",
+    "interval": "10-14 days",
+    "cultural": "Remove lower infected leaves; control weeds (Solanaceous)."
+  },
+  "Tomato - Spider mites": {
+    "chemical": "Abamectin 1.8% EC or Spiromesifen 22.9% SC",
+    "dosage": "0.5ml/L Abamectin or 1ml/L Spiromesifen",
+    "interval": "7 days",
+    "cultural": "Increase humidity around plants; use neem oil extracts (2ml/L)."
+  },
+  "Tomato - Target Spot": {
+    "chemical": "Mancozeb or Copper Oxychloride",
+    "dosage": "2g/L or 2.5g/L",
+    "interval": "10 days",
+    "cultural": "Maintain farm sanitation; ensure full coverage during spraying."
+  },
+  "Tomato - Yellow Leaf Curl Virus": {
+    "chemical": "Imidacloprid 17.8% SL (Vector control for Whitefly)",
+    "dosage": "0.3ml/L of water",
+    "interval": "15 days",
+    "cultural": "Use yellow sticky traps; plant resistant hybrids; remove infected viral 'source' plants."
+  },
+  "Tomato - Mosaic virus": {
+    "chemical": "Imidacloprid (Vector control) + Viricide (e.g., Virohit)",
+    "dosage": "0.3ml/L Imidacloprid",
+    "interval": "Weekly monitoring",
+    "cultural": "Wash hands with soap before handling plants; control sucking pests."
+  },
+  "Tomato - healthy": {
+    "chemical": "None",
+    "dosage": "N/A",
+    "interval": "N/A",
+    "cultural": "Balanced NPK application and preventive neem sprays."
+  }
+}
